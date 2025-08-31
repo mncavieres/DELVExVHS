@@ -76,6 +76,10 @@ rvs_make_ccf --setup xshooter_nir --lambda0 10240 --lambda1 24800 \
   --every 30 --vsinis 0,10,300 --prefix /tmpl/xshooter/ --step 0.5
 ```
 
+Note that here the wavelength range must exceed the wavelength covered by the spectra to take
+into account the radial velocity range that will be considered. If we wish to allow extreme 
+radial velocities we must add a few hundred angstroms here
+
 3. **Create a config YAML per arm**
    Point RVSpecFit to the template library you just built and set your search ranges. Minimal example:
 
