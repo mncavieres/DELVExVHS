@@ -1,137 +1,169 @@
-# README — Batch-fitting X-shooter spectra with `rvspecfit`
+# Batch-fitting ESO X-shooter spectra with RVSpecFit
 
-This script walks a folder of FITS files, **selects one X-shooter arm** (UVB/VIS/NIR), runs your `rvspecfit` pipeline on each spectrum, and **appends results to a CSV catalog** after every file (safe to interrupt and resume).
+This package provides a command-line script that scans a folder of X-shooter FITS files, processes **one arm per run** (UVB, VIS, or NIR), and appends the fitted results to a single CSV catalog—**updating the file after every spectrum** so runs are safe to interrupt and resume.
 
 ---
 
-## Features
+## What you get
 
-* Process **one arm per run**: `--arm UVB|VIS|NIR` (default: `NIR`).
-* Arm-specific **default wavelength ranges** (nm):
+* A single CSV catalog with one row per processed spectrum.
+* Works arm-by-arm: `--arm UVB|VIS|NIR` (default: `NIR`).
+* Reasonable **default wavelength windows** (in **nm**):
 
   * **UVB:** 305–555
   * **VIS:** 550–1020
   * **NIR:** 1024–2480
-    Override with `--wave-min-nm` / `--wave-max-nm`.
-* Uses your `rvspecfit` flow: `fitter_ccf` → `vel_fit.process`.
-* **Setup string** for `SpecData` via `--setup` (default: `xshooter`).
-* Optional **per-arm config** via `--config` (YAML).
-* CSV includes `OBJECT` (first column) and `arm`, plus parameters, errors, flags.
-* **Resumable**: with `--skip-existing`, it skips rows that already exist for the same `(OBJECT, ARM)`.
+    You can override per run with `--wave-min-nm / --wave-max-nm`.
+* Per-arm **setup** (`--setup`) and **config** (`--config`) so you can match instrument settings and template libraries.
+* **Resumable** processing: optional `--skip-existing` avoids re-adding rows for the same `(OBJECT, ARM)`.
 
 ---
 
-## Requirements
+## Quick start
 
-* Python 3.9+ recommended
-* Packages:
-
-  * `rvspecfit`
-  * `astropy`
-  * `numpy`
-
-Install (example):
+1. **Install dependencies**
 
 ```bash
-pip install astropy numpy
-# Install rvspecfit per its instructions (e.g., pip, conda, or from source).
+# minimal python deps
+pip install numpy astropy
+# install RVSpecFit (follow its instructions: pip/conda/from source)
 ```
 
----
+2. **Prepare RVSpecFit templates per arm (one-time per setup)**
+   For each arm you plan to process, you must build:
 
-## Expected FITS format
+* an **interpolated template grid**,
+* the **n-D interpolator**, and
+* **CCF templates**,
 
-* Primary header must include:
+and you must use the **same `--setup` string** you’ll pass to the script.
 
-  * `OBJECT` — target identifier (used as the first CSV column)
-  * `HIERARCH ESO SEQ ARM` — one of `UVB`, `VIS`, `NIR` (used to filter)
-* HDU 1 (table) must contain columns:
+> RVSpecFit template tools expect wavelengths in **Ångström**. Convert nm→Å by ×10.
 
-  * `WAVE` (nm)
-  * `FLUX_REDUCED`
-  * `ERR_REDUCED`
-
----
-
-## Usage
-
+Example shell plan (adjust paths, resolution model, and options):
 
 ```bash
-python make_catalog_xsh.py /path/to/fits_folder /path/to/catalog.csv [OPTIONS]
+# 0) One-time: create PHOENIX database (reused by all arms)
+rvs_read_grid \
+  --prefix /path/to/PHOENIX/v2.0/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/ \
+  --templdb /tmpl/xshooter/files.db
+
+# --- UVB (setup: xshooter_uvb), 305–555 nm => 3050–5550 Å ---
+rvs_make_interpol --setup xshooter_uvb --lambda0 3050 --lambda1 5550 \
+  --resol_func '...' --step 0.5 \
+  --templdb /tmpl/xshooter/files.db --oprefix /tmpl/xshooter/ \
+  --templprefix /path/to/PHOENIX/... --wavefile WAVE_PHOENIX-ACES-AGSS-COND-2011.fits --air
+rvs_make_nd --prefix /tmpl/xshooter/ --setup xshooter_uvb
+rvs_make_ccf --setup xshooter_uvb --lambda0 3050 --lambda1 5550 \
+  --every 30 --vsinis 0,10,300 --prefix /tmpl/xshooter/ --step 0.5
+
+# --- VIS (setup: xshooter_vis), 550–1020 nm => 5500–10200 Å ---
+rvs_make_interpol --setup xshooter_vis --lambda0 5500 --lambda1 10200 \
+  --resol_func '...' --step 0.5 \
+  --templdb /tmpl/xshooter/files.db --oprefix /tmpl/xshooter/ \
+  --templprefix /path/to/PHOENIX/... --wavefile WAVE_PHOENIX-ACES-AGSS-COND-2011.fits --air
+rvs_make_nd --prefix /tmpl/xshooter/ --setup xshooter_vis
+rvs_make_ccf --setup xshooter_vis --lambda0 5500 --lambda1 10200 \
+  --every 30 --vsinis 0,10,300 --prefix /tmpl/xshooter/ --step 0.5
+
+# --- NIR (setup: xshooter_nir), 1024–2480 nm => 10240–24800 Å ---
+rvs_make_interpol --setup xshooter_nir --lambda0 10240 --lambda1 24800 \
+  --resol_func '...' --step 0.5 \
+  --templdb /tmpl/xshooter/files.db --oprefix /tmpl/xshooter/ \
+  --templprefix /path/to/PHOENIX/... --wavefile WAVE_PHOENIX-ACES-AGSS-COND-2011.fits --air
+rvs_make_nd --prefix /tmpl/xshooter/ --setup xshooter_nir
+rvs_make_ccf --setup xshooter_nir --lambda0 10240 --lambda1 24800 \
+  --every 30 --vsinis 0,10,300 --prefix /tmpl/xshooter/ --step 0.5
 ```
 
-### Common options
+3. **Create a config YAML per arm**
+   Point RVSpecFit to the template library you just built and set your search ranges. Minimal example:
 
-* `--arm {UVB,VIS,NIR}`: which arm to process (default `NIR`)
-* `--config /path/to/config.yaml`: rvspecfit config for this arm (optional)
-* `--setup xshooter`: SpecData setup string (default `xshooter`)
-* `--recursive`: search subdirectories for FITS
-* `--skip-existing`: don’t re-process rows already present for the same `(OBJECT, ARM)`
-* `--wave-min-nm  ...` / `--wave-max-nm ...`: override arm defaults (nm)
+```yaml
+# nir_config.yaml
+template_lib: "/tmpl/xshooter/"   # directory used above by the template tools
+min_vel: -1500
+max_vel: 1500
+min_vel_step: 0.2
+vel_step0: 5
+min_vsini: 0.01
+max_vsini: 500
+second_minimizer: 1
+```
 
----
+4. **Run the script** (assumes it’s saved as `make_catalog_xsh.py`)
 
-## Examples
-
-### NIR (defaults to 1024–2480 nm)
+* **NIR** (defaults to 1024–2480 nm):
 
 ```bash
 python make_catalog_xsh.py /data/xshooter /data/catalog.csv \
-  --arm NIR \
-  --config /configs/nir_config.yaml \
-  --setup xshooter \
-  --recursive \
-  --skip-existing
+  --arm NIR --config /configs/nir_config.yaml --setup xshooter_nir \
+  --recursive --skip-existing
 ```
 
-### VIS (defaults updated to 550–1020 nm)
+* **VIS** (defaults to 550–1020 nm):
 
 ```bash
 python make_catalog_xsh.py /data/xshooter /data/catalog.csv \
-  --arm VIS \
-  --config /configs/vis_config.yaml \
-  --setup xshooter_vis
+  --arm VIS --config /configs/vis_config.yaml --setup xshooter_vis
 ```
 
-Override VIS wavelength window:
+* **UVB** (defaults to 305–555 nm):
 
 ```bash
 python make_catalog_xsh.py /data/xshooter /data/catalog.csv \
-  --arm VIS \
-  --config /configs/vis_config.yaml \
-  --setup xshooter_vis \
+  --arm UVB --config /configs/uvb_config.yaml --setup xshooter_uvb
+```
+
+Override the window if needed:
+
+```bash
+python make_catalog_xsh.py /data/xshooter /data/catalog.csv \
+  --arm VIS --config /configs/vis_config.yaml --setup xshooter_vis \
   --wave-min-nm 560 --wave-max-nm 1000
 ```
 
-### UVB (defaults updated to 305–555 nm)
+---
 
-```bash
-python make_catalog_xsh.py /data/xshooter /data/catalog.csv \
-  --arm UVB \
-  --config /configs/uvb_config.yaml \
-  --setup xshooter_uvb
+## Command reference
+
+```
+python make_catalog_xsh.py INPUT_DIR OUTPUT_CSV [options]
 ```
 
-### Building a single catalog across arms
+**Core options**
 
-You can append results from different arms into the **same** CSV. The catalog includes an `arm` column, and `--skip-existing` compares `(OBJECT, ARM)` so multiple arms per object are allowed:
+* `--arm {UVB,VIS,NIR}`: choose the X-shooter arm to process (default: `NIR`)
+* `--config PATH`: RVSpecFit YAML config for **this arm/setup**
+* `--setup STRING`: setup name used when building templates for this arm (default: `xshooter`)
+* `--wave-min-nm FLOAT`, `--wave-max-nm FLOAT`: wavelength range in **nm** (override arm defaults)
 
-```bash
-# UVB pass
-python make_catalog_xsh.py /data/uvb /data/catalog.csv --arm UVB --config /configs/uvb.yaml --setup xshooter_uvb --skip-existing
+**Convenience**
 
-# VIS pass
-python make_catalog_xsh.py /data/vis /data/catalog.csv --arm VIS --config /configs/vis.yaml --setup xshooter_vis --skip-existing
-
-# NIR pass
-python make_catalog_xsh.py /data/nir /data/catalog.csv --arm NIR --config /configs/nir.yaml --setup xshooter --skip-existing
-```
+* `--recursive`: search subdirectories for FITS
+* `--skip-existing`: don’t re-add rows already present for the same `(OBJECT, ARM)`
 
 ---
 
-## What the script writes
+## Input data expectations
 
-Each processed spectrum yields one CSV row with these columns:
+* **Primary header** must contain:
+
+  * `OBJECT` — target identifier (becomes the first CSV column)
+  * `HIERARCH ESO SEQ ARM` — should be `UVB`, `VIS`, or `NIR` (used to select files)
+* **HDU 1** (table) must provide:
+
+  * `WAVE` (in **nm**)
+  * `FLUX_REDUCED`
+  * `ERR_REDUCED`
+
+Files with missing headers/columns are skipped and a warning is printed; a minimal “failure” row is still added to the CSV for traceability.
+
+---
+
+## What the CSV contains
+
+Columns (in order):
 
 ```
 OBJECT, arm,
@@ -144,230 +176,32 @@ chisq, logl, npix, chisq_red,
 filename
 ```
 
-* `OBJECT` comes from the primary header.
-* `arm` is the arm being processed for that file.
-* `minimize_success`, `bad_hessian` come from the fit result (booleans).
+Notes:
+
+* `arm` is the arm processed for that row.
 * `chisq_red` is computed as `chisq / npix` when available.
-* On **failure**, a minimal row is still written with flags set to `False` and blanks elsewhere (keeping a complete ledger of attempts).
+* On exceptions, a row is still written with flags set to `False` and blanks elsewhere.
+
+You can safely **append multiple arms to the same CSV**; use `--skip-existing` to avoid duplicate `(OBJECT, ARM)` entries.
 
 ---
 
-## How it filters files
+## Tips & troubleshooting
 
-Only files where the **primary header** has:
-
-```
-HIERARCH ESO SEQ ARM == <selected --arm>
-```
-
-are processed; others are skipped.
+* **Template/CCF per arm is mandatory.** Each arm has different λ-coverage and resolution, so build templates and CCFs **per arm** and keep the **same `--setup`** across template tools, your YAML config, and the script run.
+* **Units:** The script’s wavelength range is in **nm**; RVSpecFit template tools (`rvs_make_interpol`, `rvs_make_ccf`) use **Å**.
+* **Resolution model:** Choose a realistic `--resol_func` for each arm (constant R or wavelength-dependent).
+* **Continuum & masks:** If you see large χ² or unrealistically small errors, check your config (variance weighting, telluric/bad-pixel masks, continuum model).
+* **Multiple exposures per object:** If you want one row per exposure regardless of object name, don’t use `--skip-existing`; the `filename` column preserves provenance.
 
 ---
 
-## Notes & tips
+## How the script works (at a glance)
 
-* **Setup/config per arm:** Choose appropriate `--setup` and `--config` for each arm’s resolution and preprocessing.
-* **Wavelengths:** Arm defaults are sensible starting points; refine with `--wave-*` if your reduction masks specific regions.
-* **Resuming:** Use `--skip-existing` to avoid re-processing already cataloged `(OBJECT, ARM)` pairs.
-* **Provenance:** The `filename` column helps trace back results.
+For each FITS in `INPUT_DIR` that matches the chosen arm:
 
----
-
-## Internals (fit flow)
-
-For each file:
-
-1. Read HDU 1 table (`WAVE`, `FLUX_REDUCED`, `ERR_REDUCED`).
-2. Restrict to `[wave_min_nm, wave_max_nm]` (nm).
-3. Convert wavelength to Å (×10) and construct `spec_fit.SpecData(setup, ...)`.
-4. `fitter_ccf.fit(...)` to get initial parameters (carry `best_vsini` if present).
-5. `vel_fit.process(...)` runs the maximum-likelihood fit with `options={'npoly': 15}`.
-6. Flatten results → CSV row; append immediately (checkpoint).
-
----
-
-## Troubleshooting
-
-* **Missing columns** (`WAVE`, `FLUX_REDUCED`, `ERR_REDUCED`) or headers (`OBJECT`, `HIERARCH ESO SEQ ARM`): the file will be skipped with a warning; a minimal failure row is still written.
-* **Weirdly small uncertainties / large χ²:** ensure correct variance, masks, and LSF handling in your `rvspecfit` config.
-* **Multiple spectra per object:** If you need per-exposure rows instead of per-object, remove `--skip-existing` or change the resumable key to include `filename`.
-
-
-# Template preparation per arm (UVB / VIS / NIR)
-
-rvspecfit requires you to prepare template files **per spectral configuration** (i.e., per arm), and the **`--setup` string must match** what you use in your code (the `SpecData(setup, ...)` value and the `--setup` CLI option). Each arm (UVB, VIS, NIR) should have its **own setup name**, its **own interpolator**, and its **own CCF** files.
-
-> Summary of steps (run once per arm & setup):
->
-> 1. `rvs_read_grid` (create PHOENIX DB; usually once overall)
-> 2. `rvs_make_interpol` (interpolated templates at your arm’s λ-range & resolution)
-> 3. `rvs_make_nd` (N-D interpolator)
-> 4. `rvs_make_ccf` (CCF templates)
-
-These are the **official rvspecfit tools**; see the docs for details and extra options. ([rvspecfit.readthedocs.io][1])
-
-## Units and ranges
-
-* `--lambda0/--lambda1` for **template tools are in Ångström** (not nm).
-  Use ×10 to convert from the defaults you pass to the script:
-
-  * UVB default: **305–555 nm → 3050–5550 Å**
-  * VIS default: **550–1020 nm → 5500–10200 Å**
-  * NIR default: **1024–2480 nm → 10240–24800 Å**
-
-## Example: build templates for each arm
-
-Pick a **root directory** where you’ll store template outputs, e.g. `/tmpl/xshooter/`. You can reuse the same PHOENIX database for all arms, but run `make_interpol`, `make_nd`, and `make_ccf` **separately per arm** with distinct `--setup` names.
-
-### 0) One-time: create PHOENIX database
-
-```bash
-rvs_read_grid \
-  --prefix /path/to/PHOENIX/v2.0/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/ \
-  --templdb /tmpl/xshooter/files.db
-```
-
-(Do this once; reuse `files.db` below.) ([rvspecfit.readthedocs.io][1])
-
----
-
-### UVB (setup example: `xshooter_uvb`, 3050–5550 Å)
-
-```bash
-# Interpolated spectra for UVB
-rvs_make_interpol \
-  --setup xshooter_uvb \
-  --lambda0 3050 --lambda1 5550 \
-  --resol_func '...' \
-  --step 0.5 \
-  --templdb /tmpl/xshooter/files.db \
-  --oprefix /tmpl/xshooter/ \
-  --templprefix /path/to/PHOENIX/v2.0/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/ \
-  --wavefile WAVE_PHOENIX-ACES-AGSS-COND-2011.fits \
-  --air \
-  --revision v2020x
-
-# Build the n-D interpolator
-rvs_make_nd \
-  --prefix /tmpl/xshooter/ \
-  --setup xshooter_uvb \
-  --revision v2020x
-
-# Build the CCF templates
-rvs_make_ccf \
-  --setup xshooter_uvb \
-  --lambda0 3050 --lambda1 5550 \
-  --every 30 \
-  --vsinis 0,10,300 \
-  --prefix /tmpl/xshooter/ \
-  --step 0.5 \
-  --revision v2020x
-```
-
----
-
-### VIS (setup example: `xshooter_vis`, 5500–10200 Å)
-
-```bash
-rvs_make_interpol \
-  --setup xshooter_vis \
-  --lambda0 5500 --lambda1 10200 \
-  --resol_func '...' \
-  --step 0.5 \
-  --templdb /tmpl/xshooter/files.db \
-  --oprefix /tmpl/xshooter/ \
-  --templprefix /path/to/PHOENIX/... \
-  --wavefile WAVE_PHOENIX-ACES-AGSS-COND-2011.fits \
-  --air \
-  --revision v2020x
-
-rvs_make_nd \
-  --prefix /tmpl/xshooter/ \
-  --setup xshooter_vis \
-  --revision v2020x
-
-rvs_make_ccf \
-  --setup xshooter_vis \
-  --lambda0 5500 --lambda1 10200 \
-  --every 30 \
-  --vsinis 0,10,300 \
-  --prefix /tmpl/xshooter/ \
-  --step 0.5 \
-  --revision v2020x
-```
-
----
-
-### NIR (setup example: `xshooter_nir`, 10240–24800 Å)
-
-```bash
-rvs_make_interpol \
-  --setup xshooter_nir \
-  --lambda0 10240 --lambda1 24800 \
-  --resol_func '...' \
-  --step 0.5 \
-  --templdb /tmpl/xshooter/files.db \
-  --oprefix /tmpl/xshooter/ \
-  --templprefix /path/to/PHOENIX/... \
-  --wavefile WAVE_PHOENIX-ACES-AGSS-COND-2011.fits \
-  --air \
-  --revision v2020x
-
-rvs_make_nd \
-  --prefix /tmpl/xshooter/ \
-  --setup xshooter_nir \
-  --revision v2020x
-
-rvs_make_ccf \
-  --setup xshooter_nir \
-  --lambda0 10240 --lambda1 24800 \
-  --every 30 \
-  --vsinis 0,10,300 \
-  --prefix /tmpl/xshooter/ \
-  --step 0.5 \
-  --revision v2020x
-```
-
-> Tip: choose a realistic `--resol_func` for each arm (e.g., a constant resolving power or a wavelength-dependent model). See the rvspecfit docs for details and options. ([rvspecfit.readthedocs.io][1])
-
-## Config files per arm
-
-Create a **separate config YAML** for each arm (or a single YAML that points to different `template_lib` dirs depending on your `--setup`). The key bit is that it must point at the directory where the above tools wrote templates:
-
-```yaml
-# nir_config.yaml
-template_lib: "/tmpl/xshooter/"   # root where xshooter_nir outputs live
-min_vel: -1500
-max_vel: 1500
-min_vel_step: 0.2
-vel_step0: 5
-min_vsini: 0.01
-max_vsini: 500
-second_minimizer: 1
-```
-
-Use the matching setup when running the script, e.g.:
-
-```bash
-# UVB pass
-python make_catalog_xsh.py /data/uvb /data/catalog.csv \
-  --arm UVB --setup xshooter_uvb --config uvb_config.yaml
-
-# VIS pass
-python make_catalog_xsh.py /data/vis /data/catalog.csv \
-  --arm VIS --setup xshooter_vis --config vis_config.yaml
-
-# NIR pass
-python make_catalog_xsh.py /data/nir /data/catalog.csv \
-  --arm NIR --setup xshooter_nir --config nir_config.yaml
-```
-
-## Why separate builds per arm?
-
-Each **arm** has its **own wavelength range and resolution**, so you need **arm-specific template grids** and **CCF templates** that match those characteristics. Using **the same `--setup` string** consistently (in template tools, in your config, and in `SpecData`) ensures the fitter loads the correct interpolator and CCF for that arm. ([rvspecfit.readthedocs.io][1])
-
----
-
-**Reference:** rvspecfit docs (template preparation pipeline and commands). ([rvspecfit.readthedocs.io][1])
-
-[1]: https://rvspecfit.readthedocs.io/ "RVSpecFit: Automated Spectroscopic Pipeline — rvspecfit  documentation"
+1. Read `WAVE`/`FLUX_REDUCED`/`ERR_REDUCED` from HDU 1.
+2. Restrict to the selected `[wave_min_nm, wave_max_nm]` (nm), convert to Å.
+3. Build an in-memory spectrum with your `--setup`.
+4. Run RVSpecFit to estimate RV and stellar parameters for that spectrum.
+5. Write a row to `OUTPUT_CSV` immediately (checkpoint).
