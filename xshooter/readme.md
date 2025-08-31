@@ -55,7 +55,6 @@ pip install astropy numpy
 
 ## Usage
 
-Assuming you saved the script as **`make_catalog_xsh.py`**:
 
 ```bash
 python make_catalog_xsh.py /path/to/fits_folder /path/to/catalog.csv [OPTIONS]
