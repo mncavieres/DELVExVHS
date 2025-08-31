@@ -9,6 +9,7 @@ from astropy.io import fits
 from astropy.table import Table
 from rvspecfit import fitter_ccf, vel_fit, spec_fit, utils
 
+
 CATALOG_COLUMNS = [
     "OBJECT", "arm",                 # keep OBJECT as first column, add ARM next
     "teff", "logg", "feh", "alpha",
@@ -20,14 +21,14 @@ CATALOG_COLUMNS = [
     "filename",
 ]
 
-# Sensible X-shooter arm defaults (nm). Can be overridden by CLI args.
+# Sensible X-shooter arm defaults (nm). Override on CLI if you prefer.
 DEFAULT_RANGES_NM = {
     "UVB": (300.0, 559.0),
     "VIS": (559.0, 1024.0),
     "NIR": (1024.0, 2480.0),
 }
 
-
+# ---------- Helpers ----------
 def _to_float(x):
     try:
         if x is None:
@@ -157,6 +158,7 @@ def _extract_row(result, object_name, fname, arm_str):
         "chisq_red": _to_float(chisq_red),
         "filename": str(fname),
     }
+
 
 def process_folder(
     input_dir,
