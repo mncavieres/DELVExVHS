@@ -9,8 +9,9 @@ from astropy.io import fits
 from astropy.table import Table
 from rvspecfit import fitter_ccf, vel_fit, spec_fit, utils
 
+
 CATALOG_COLUMNS = [
-    "OBJECT", "arm",
+    "OBJECT", "arm",                 # keep OBJECT as first column, add ARM next
     "teff", "logg", "feh", "alpha",
     "vsini",
     "vel", "vel_err", "vel_skewness", "vel_kurtosis",
@@ -20,7 +21,7 @@ CATALOG_COLUMNS = [
     "filename",
 ]
 
-# Arm defaults (nm)
+# Sensible X-shooter arm defaults (nm). Override on CLI if you prefer.
 DEFAULT_RANGES_NM = {
     "UVB": (300.0, 559.0),
     "VIS": (552.0, 1019.0),
@@ -68,25 +69,6 @@ def _iter_fits_files(input_dir, recursive=False):
         for pat in exts:
             yield from p.glob(pat)
 
-def _compute_chi2_red(result):
-    """Prefer array totals if present; else fall back to chisq/npix."""
-    chi2 = result.get("chisq")
-    npix = result.get("npix")
-    chi2_arr = result.get("chisq_array")
-    npix_arr = result.get("npix_array")
-    if chi2_arr is not None:
-        try:
-            chi2 = float(np.sum(np.asarray(chi2_arr)))
-        except Exception:
-            pass
-    if npix_arr is not None:
-        try:
-            npix = int(np.sum(np.asarray(npix_arr)))
-        except Exception:
-            pass
-    if chi2 is None or npix in (None, 0):
-        return math.nan, _to_float(result.get("chisq")), ("" if npix is None else int(_to_float(npix)))
-    return (float(chi2) / float(npix)), float(chi2), int(npix)
 
 def fit_one_file_with_rvspecfit(
     fits_path,
@@ -94,62 +76,63 @@ def fit_one_file_with_rvspecfit(
     setup="xshooter",
     wave_min_nm=None,
     wave_max_nm=None,
-    hdu=1,
-    arm="NIR",
 ):
     """
-    Reads HDU table (WAVE, FLUX_REDUCED, ERR_REDUCED), optional nm window,
-    converts nm->Å, runs fitter_ccf (carry best_vsini), then vel_fit.process.
+    Reads HDU=1 table (WAVE, FLUX_REDUCED, ERR_REDUCED), restricts to [min,max] nm,
+    converts nm->Å, runs fitter_ccf for init (carries best_vsini), then vel_fit.process.
     """
     config = utils.read_config(config_path) if config_path else None
 
-    tab = Table.read(str(fits_path), hdu=hdu)
-    wavelength = tab["WAVE"]             # expected in nm (Quantity or ndarray)
-    spec = np.asarray(tab["FLUX_REDUCED"], dtype=float)
-    espec = np.asarray(tab["ERR_REDUCED"], dtype=float)
+    tab = Table.read(str(fits_path), hdu=1)
+    wavelength = tab["WAVE"]
+    spec = tab["FLUX_REDUCED"]
+    espec = tab["ERR_REDUCED"]
 
-    # nm window
     wv = getattr(wavelength, "value", wavelength)
     if wave_min_nm is not None and wave_max_nm is not None:
-        mask_nm = (wv > wave_min_nm) & (wv < wave_max_nm)
-    else:
-        mask_nm = np.ones_like(np.asarray(wv), dtype=bool)
+        mask = (wv > wave_min_nm) & (wv < wave_max_nm)
+        wavelength = wavelength[mask]
+        spec = spec[mask]
+        espec = espec[mask]
 
-    # ---- universal error inflation ----
-    # Always de-weight non-positive uncertainties for ALL arms
-    espec = np.where(espec <= 0, 1e10, espec)
+    specdata = [spec_fit.SpecData(
+        setup,
+        wavelength * 10.0,  # nm -> Å
+        spec,
+        espec
+    )]
 
-    # ---- VIS-specific telluric O2 band (nm) ----
-    if arm.upper() == "VIS":
-        espec = np.where((wv > 757.5) & (wv < 767.5), 1e10, espec)
-
-    # Keep only finite values (no espec>0 check needed since we inflated <=0)
-    finite = np.isfinite(wv) & np.isfinite(spec) & np.isfinite(espec)
-    mask = mask_nm & finite
-
-    wave_A = (wavelength[mask] * 10.0)  # nm -> Å
-    flux = spec[mask]
-    eflux = espec[mask]
-
-    # Build SpecData
-    specdata = [spec_fit.SpecData(setup, wave_A, flux, eflux)]
-
-    # Initial guess
     res0 = fitter_ccf.fit(specdata, config)
     param0 = dict(res0["best_par"])
+
     if res0.get("best_vsini") is not None:
         param0["vsini"] = res0["best_vsini"]
 
     options = {"npoly": 15}
-    res1 = vel_fit.process(specdata, param0, fixParam=[], config=config, options=options)
-    return res1
 
+    res1 = vel_fit.process(
+        specdata,
+        param0,
+        fixParam=[],
+        config=config,
+        options=options
+    )
+    return res1
 
 def _extract_row(result, object_name, fname, arm_str):
     param = result.get("param", {}) or {}
     perr  = result.get("param_err", {}) or {}
 
-    chi2_red, chi2_val, npix_val = _compute_chi2_red(result)
+    chisq = result.get("chisq")
+    npix = None
+    if isinstance(result.get("npix_array"), (list, tuple)) and len(result["npix_array"]) > 0:
+        npix = result["npix_array"][0]
+    if npix is None:
+        npix = result.get("npix")
+
+    chisq_red = math.nan
+    if chisq is not None and npix not in (None, 0):
+        chisq_red = _to_float(chisq) / _to_float(npix)
 
     return {
         "OBJECT": object_name,
@@ -169,25 +152,24 @@ def _extract_row(result, object_name, fname, arm_str):
         "alpha_err": _to_float(_normalize_key_get(perr, "alpha")),
         "minimize_success": bool(result.get("minimize_success", False)),
         "bad_hessian": bool(result.get("bad_hessian", False)),
-        "chisq": _to_float(chi2_val),
+        "chisq": _to_float(chisq),
         "logl": _to_float(result.get("logl")),
-        "npix": npix_val if npix_val != "" else "",
-        "chisq_red": _to_float(chi2_red),
+        "npix": int(_to_float(npix)) if not math.isnan(_to_float(npix)) else "",
+        "chisq_red": _to_float(chisq_red),
         "filename": str(fname),
     }
+
 
 def process_folder(
     input_dir,
     output_csv,
     arm="NIR",
     config_path=None,
-    setup=None,            # <- allow None so we can default per-arm
+    setup="xshooter",
     recursive=False,
     wave_min_nm=None,
     wave_max_nm=None,
-    skip_existing=False,
-    object_key="OBJECT",
-    hdu=1,
+    skip_existing=False
 ):
     input_dir = Path(input_dir)
     output_csv = Path(output_csv)
@@ -195,19 +177,16 @@ def process_folder(
     if arm not in ("UVB", "VIS", "NIR"):
         raise ValueError(f"--arm must be one of UVB, VIS, NIR (got {arm})")
 
-    # ----- default setup per arm -----
-    if setup is None:
-        setup = "vis_xshooter" if arm == "VIS" else "xshooter"
-
     # fill wavelength defaults if not provided
     if wave_min_nm is None or wave_max_nm is None:
         wave_min_nm, wave_max_nm = DEFAULT_RANGES_NM[arm]
+
     if wave_min_nm >= wave_max_nm:
         raise ValueError("wave-min-nm must be < wave-max-nm")
 
     _ensure_catalog(output_csv)
 
-    # resumability: key on (OBJECT, ARM)
+    # resumability: key on (OBJECT, ARM) so same object can appear in multiple arms
     existing = set()
     if skip_existing:
         with output_csv.open("r", newline="") as f:
@@ -215,10 +194,6 @@ def process_folder(
             for r in reader:
                 key = (r.get("OBJECT", ""), r.get("arm", "").upper())
                 existing.add(key)
-
-    n_processed = 0
-    n_skipped = 0
-    n_failed = 0
 
     with output_csv.open("a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=CATALOG_COLUMNS)
@@ -228,17 +203,11 @@ def process_folder(
                 hdr0 = fits.getheader(fp, 0)
                 hdr_arm = _safe_header_get(hdr0, "HIERARCH ESO SEQ ARM", default="").upper()
                 if hdr_arm != arm:
-                    n_skipped += 1
                     continue  # only process selected arm
 
-                # OBJECT with fallback
-                obj = _safe_header_get(hdr0, object_key, default="").strip()
-                if not obj:
-                    obj = _safe_header_get(hdr0, "HIERARCH ESO OBS TARG NAME", default=Path(fp).stem).strip()
-
+                obj = _safe_header_get(hdr0, "OBJECT", default=Path(fp).stem)
                 key = (obj, arm)
                 if skip_existing and key in existing:
-                    n_skipped += 1
                     continue
 
                 result = fit_one_file_with_rvspecfit(
@@ -247,39 +216,32 @@ def process_folder(
                     setup=setup,
                     wave_min_nm=wave_min_nm,
                     wave_max_nm=wave_max_nm,
-                    hdu=hdu,
-                    arm=arm,  # pass through for VIS-specific masking
                 )
 
                 row = _extract_row(result, obj, Path(fp).name, arm)
                 writer.writerow(row)
                 f.flush()
                 existing.add(key)
-                n_processed += 1
 
             except Exception as e:
-                # Still write a trace row on failure
+                # still write a trace row on failure
                 try:
-                    obj_try = fits.getheader(fp, 0).get(object_key, Path(fp).stem)
+                    hdr_arm = fits.getheader(fp, 0).get("HIERARCH ESO SEQ ARM", arm)
+                    obj = fits.getheader(fp, 0).get("OBJECT", Path(fp).stem)
                 except Exception:
-                    obj_try = Path(fp).stem
+                    hdr_arm = arm
+                    obj = Path(fp).stem
                 row = {k: "" for k in CATALOG_COLUMNS}
                 row.update({
-                    "OBJECT": str(obj_try),
-                    "arm": arm,
+                    "OBJECT": obj,
+                    "arm": str(hdr_arm),
                     "minimize_success": False,
                     "bad_hessian": False,
                     "filename": Path(fp).name,
                 })
-                try:
-                    writer.writerow(row)
-                    f.flush()
-                except Exception:
-                    pass
-                n_failed += 1
+                writer.writerow(row)
+                f.flush()
                 print(f"[WARN] Failed on {fp}: {e}", file=sys.stderr)
-
-    print(f"[INFO] Done. processed={n_processed}, skipped={n_skipped}, failed={n_failed}", file=sys.stderr)
 
 def main():
     p = argparse.ArgumentParser(
@@ -290,9 +252,8 @@ def main():
     p.add_argument("--arm", default="NIR", choices=["UVB", "VIS", "NIR"],
                    help="Which arm to process (default: NIR)")
     p.add_argument("--config", help="Path to rvspecfit config.yaml for this arm (optional)")
-    # default is arm-dependent; if user omits --setup, VIS -> vis_xshooter, else xshooter
-    p.add_argument("--setup", default=None,
-                   help='SpecData setup string; default is "vis_xshooter" for VIS, otherwise "xshooter"')
+    p.add_argument("--setup", default="xshooter",
+                   help='SpecData setup string for this arm (default: "xshooter")')
     p.add_argument("--recursive", action="store_true", help="Recurse into subdirectories")
     p.add_argument("--skip-existing", action="store_true",
                    help="Skip rows whose (OBJECT, ARM) already exist in the CSV")
@@ -300,10 +261,6 @@ def main():
                    help="Lower wavelength bound in nm (override arm default)")
     p.add_argument("--wave-max-nm", type=float, default=None,
                    help="Upper wavelength bound in nm (override arm default)")
-    p.add_argument("--object-key", default="OBJECT",
-                   help='Primary header keyword for target name (default: "OBJECT")')
-    p.add_argument("--hdu", type=int, default=1,
-                   help="HDU index of the spectral table (default: 1)")
     args = p.parse_args()
 
     process_folder(
@@ -316,8 +273,6 @@ def main():
         wave_min_nm=args.wave_min_nm,
         wave_max_nm=args.wave_max_nm,
         skip_existing=args.skip_existing,
-        object_key=args.object_key,
-        hdu=args.hdu,
     )
 
 if __name__ == "__main__":

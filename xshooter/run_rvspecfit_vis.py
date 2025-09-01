@@ -13,25 +13,30 @@ run_path = '/Users/mncavieres/Documents/2024-1/Delve/xshooter/Spec/Star01'
 # with wavelength being in Angstrom
 # espec being a vector of standard deviations
 
-tab=Table().read('/Users/mncavieres/Documents/2024-1/Delve/xshooter/Spec/Star01/ADP.2025-07-13T14_06_10.099.fits', hdu=1) # read the fits file
+tab=Table().read('/Users/mncavieres/Documents/2024-1/Delve/xshooter/Spec/Star01/ADP.2025-07-13T14_06_10.094.fits', hdu=1) # read the fits file
 wavelength = tab['WAVE']
 spec = tab['FLUX_REDUCED'] #+ 2
 espec = tab['ERR_REDUCED'] # add a small value to avoid division by zero
 
 # reduce range
-lim_mask = (wavelength.value > 1200) & (wavelength.value < 2478)
+lim_mask = (wavelength.value > 552) & (wavelength.value < 1019)
 wavelength = wavelength[lim_mask]
 spec = spec[lim_mask]
 espec = espec[lim_mask]
 
+#mask anything with espec <=0, by settin espec to a huge value
 
+espec = np.where(espec <= 0, 1e10, espec)
+
+# also mask between 757.5 and 767.5 nm (O2 telluric)
+espec = np.where((wavelength.value > 757.5) & (wavelength.value < 767.5), 1e10, espec)
 
 # This constructs the specData object from wavelength, spectrum and error
 # spectrum arrays. The rvspecfit works on arrays of SpecData's which may
 # represent multiple exposures or multiple spectral configurations
 # Here we just have one spectrum from the spectral configuration "mysetup"
 
-specdata = [spec_fit.SpecData('xshooter',
+specdata = [spec_fit.SpecData('vis_xshooter',
                                wavelength*10, # convert nm to Angstrom
                                spec,
                                espec#,
@@ -53,10 +58,10 @@ if res['best_vsini'] is not None:
     paramDict0['vsini'] = res['best_vsini']
 
 # start off with a higher feh
-paramDict0['feh'] = 0.5
+#paramDict0['feh'] = 0.5
 
 
-options = {'npoly':15}
+options = {'npoly':20}
 
 # this does the actual fitting performing the maximum likelihood fitting of the data
 res1 = vel_fit.process(specdata,
@@ -69,7 +74,7 @@ print(res1)
 # save the results to a pickle file
 import pickle
 
-with open("/Users/mncavieres/Documents/2024-1/Delve/xshooter/Spec/Star01/res_vacuum_default_full.pkl", "wb") as f:
+with open("/Users/mncavieres/Documents/2024-1/Delve/xshooter/Spec/Star01/vis_res.pkl", "wb") as f:
     pickle.dump(res1, f)
 
 
@@ -86,6 +91,7 @@ plt.ylabel('flux')
 plt.title('1D Coadded Spectrum with Fit')
 plt.legend()
 plt.grid()
-plt.savefig(os.path.join(run_path,'rvspecfit_results.pdf'), bbox_inches='tight')
+plt.savefig(os.path.join(run_path,'rvspecfit_results_vis.pdf'), bbox_inches='tight')
 plt.show()
-Table(res1).write('b576_rvspecfit_results.fits', overwrite=True)
+
+#Table(res1).write('b576_rvspecfit_results.fits', overwrite=True)

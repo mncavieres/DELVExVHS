@@ -8,7 +8,7 @@ import os
 from multiprocessing import Pool
 
 
-plot_dir = '/Users/mncavieres/Documents/2024-1/Delve/xshooter/Spec/Star01/NIR_FIT'
+plot_dir = '/Users/mncavieres/Documents/2024-1/Delve/xshooter/Spec/Star01/VIS_FIT'
 
 #config=utils.read_config('/Users/mncavieres/Documents/2025-1/B576/rvspecfit_local/config.yaml') # optional
 # you can create a configuration file with various options
@@ -40,16 +40,36 @@ run_path = '/Users/mncavieres/Documents/2024-1/Delve/xshooter/Spec/Star01'
 # with wavelength being in Angstrom
 # espec being a vector of standard deviations
 
-tab=Table().read('/Users/mncavieres/Documents/2024-1/Delve/xshooter/Spec/Star01/ADP.2025-07-13T14_06_10.099.fits', hdu=1) # read the fits file
+tab=Table().read('/Users/mncavieres/Documents/2024-1/Delve/xshooter/Spec/Star01/ADP.2025-07-13T14_06_10.094.fits', hdu=1) # read the fits file
 wavelength = tab['WAVE']
 spec = tab['FLUX_REDUCED'] #+ 2
 espec = tab['ERR_REDUCED'] # add a small value to avoid division by zero
 
 # reduce range
-lim_mask = (wavelength.value > 1200) & (wavelength.value < 2478)
+lim_mask = (wavelength.value > 552) & (wavelength.value < 1019)
 wavelength = wavelength[lim_mask]
 spec = spec[lim_mask]
 espec = espec[lim_mask]
+
+#mask anything with espec <=0, by settin espec to a huge value
+
+espec = np.where(espec <= 0, 1e10, espec)
+
+# also mask between 757.5 and 767.5 nm (O2 telluric)
+espec = np.where((wavelength.value > 757.5) & (wavelength.value < 767.5), 1e10, espec)
+
+# This constructs the specData object from wavelength, spectrum and error
+# spectrum arrays. The rvspecfit works on arrays of SpecData's which may
+# represent multiple exposures or multiple spectral configurations
+# Here we just have one spectrum from the spectral configuration "mysetup"
+
+specdata = [spec_fit.SpecData('vis_xshooter',
+                               wavelength*10, # convert nm to Angstrom
+                               spec,
+                               espec#,
+                               #badmask=badmask
+                               )
+                              ]
 
 
 
@@ -58,13 +78,13 @@ espec = espec[lim_mask]
 # represent multiple exposures or multiple spectral configurations
 # Here we just have one spectrum from the spectral configuration "mysetup"
 
-specdata = [spec_fit.SpecData('xshooter',
-                            wavelength*10, # nm to Angstrom
-                            spec,
-                            espec#,
-                            #badmask=badmask
-                            )
-                            ]
+# specdata = [spec_fit.SpecData('vus_xshooter',
+#                             wavelength*10, # nm to Angstrom
+#                             spec,
+#                             espec#,
+#                             #badmask=badmask
+#                             )
+#                             ]
 
 
 # this tries to get a sensible guess for the stellar parameters/velocity
@@ -101,7 +121,7 @@ print('The best fit radial velocity is: ', vel)
 ndim, nwalkers, nsteps = 4, 40, 3000#4, 400, 3000
 
 # initial guess for the parameters, flat prior
-teff_init = np.random.uniform(2000, 5000, nwalkers)
+teff_init = np.random.uniform(2000, 15000, nwalkers)
 logg_init = np.random.uniform(0.1, 6.2, nwalkers)
 feh_init = np.random.uniform(-3.5,1, nwalkers)
 alpha_init = np.random.uniform(-0.19, 1.1, nwalkers)
