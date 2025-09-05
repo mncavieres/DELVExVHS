@@ -118,12 +118,12 @@ vel = res1['vel']
 print('The best fit radial velocity is: ', vel)
 
 
-ndim, nwalkers, nsteps = 4, 40, 3000#4, 400, 3000
+ndim, nwalkers, nsteps = 4, 400, 3000#4, 400, 3000
 
 # initial guess for the parameters, flat prior
 teff_init = np.random.uniform(2000, 15000, nwalkers)
 logg_init = np.random.uniform(0.1, 6.2, nwalkers)
-feh_init = np.random.uniform(-3.5,1, nwalkers)
+feh_init = np.random.uniform(-4,1, nwalkers)
 alpha_init = np.random.uniform(-0.19, 1.1, nwalkers)
 
 p0 = np.array([teff_init, logg_init, feh_init, alpha_init]).T

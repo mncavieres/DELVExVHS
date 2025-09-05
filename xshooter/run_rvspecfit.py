@@ -24,6 +24,7 @@ wavelength = wavelength[lim_mask]
 spec = spec[lim_mask]
 espec = espec[lim_mask]
 
+espec = np.where(espec <= 0, 1e10, espec)
 
 
 # This constructs the specData object from wavelength, spectrum and error
@@ -86,6 +87,6 @@ plt.ylabel('flux')
 plt.title('1D Coadded Spectrum with Fit')
 plt.legend()
 plt.grid()
-plt.savefig(os.path.join(run_path,'rvspecfit_results.pdf'), bbox_inches='tight')
+plt.savefig(os.path.join(run_path,'rvspecfit_results_NIR.pdf'), bbox_inches='tight')
 plt.show()
-Table(res1).write('b576_rvspecfit_results.fits', overwrite=True)
+#Table(res1).write('b576_rvspecfit_results.fits', overwrite=True)
