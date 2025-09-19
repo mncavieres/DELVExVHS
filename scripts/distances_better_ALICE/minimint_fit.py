@@ -38,16 +38,14 @@ from tqdm import tqdm
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-# =========================
-# GLOBALS / CONSTANTS
-# =========================
+
 # Physical / prior bounds
 M_MIN, M_MAX = 0.1, 15.0                 # Msun
-LOGAGE_MIN, LOGAGE_MAX = 5.0, 10.113943352306837  # yr
-FEH_MIN, FEH_MAX = -2.9, 0.9
+LOGAGE_MIN, LOGAGE_MAX = 5.0, 10.113943352306837  # yr, no need to go beyond the hubble time
+FEH_MIN, FEH_MAX = -2.9, 0.9 # limits of MIST
 DIST_MIN, DIST_MAX = 1.0e3, 2.0e5         # pc
-EBV_MIN_DEFAULT, EBV_MAX_DEFAULT = 0.0, 1.5
-ALPHA_IMF = 2.35
+EBV_MIN_DEFAULT, EBV_MAX_DEFAULT = 0.0, 1.5 # you might need to extend this for very reddened stars
+ALPHA_IMF = 2.35 # Salpeter slope
 
 # Supported (minimint) bands list (informative; we auto-detect from table)
 MINIMINT_BANDS = set([
@@ -82,9 +80,7 @@ ERR_SUFFIXES = ["_ERR", "_ERRMAG", "_SIG", "_E", "_error"]
 # Per-process interpolator cache (keyed by sorted tuple of bands)
 INTERP_CACHE = {}
 
-# =========================
-# Helpers
-# =========================
+# helper functions
 def _get_interpolator_for_bands(bands):
     """Create/reuse a minimint.Interpolator for this exact band set (per process)."""
     key = tuple(sorted(bands))
@@ -209,9 +205,7 @@ def _ensure_dir(path):
     os.makedirs(path, exist_ok=True)
     return path
 
-# =========================
-# Top-level, picklable callables for dynesty (use logl_args, ptform_args)
-# =========================
+# top level functions pickable for multiprocessing
 def ptform_u5(u, obs, ebv_range,
               M_MIN_=M_MIN, M_MAX_=M_MAX,
               LOGAGE_MIN_=LOGAGE_MIN, LOGAGE_MAX_=LOGAGE_MAX,
@@ -311,9 +305,7 @@ def loglike_spec_theta(theta, obs, bands):
         ll += -0.5 * ((og - model['logg']) / eg)**2
     return float(ll)
 
-# =========================
-# Public API
-# =========================
+# main function
 def fit_stars_with_minimint(
     table: Table,
     output_path: str,
@@ -518,7 +510,7 @@ def fit_stars_with_minimint(
             table.write(out_file.replace('.fits', '.ecsv'), overwrite=True)
     return table
 
-# Optional CLI usage
+
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser(description="Run minimint nested fits on an input catalog.")
