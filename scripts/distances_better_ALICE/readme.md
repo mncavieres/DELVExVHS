@@ -248,4 +248,4 @@ Do whatever you want, fully open source
 
 ## Citation
 
-If this tool is used in a publication, please cite **dynesty**, **MIST/minimint**, and Cavieres et al. 2025, and your data sources (e.g., Gaia, DECam).
+If this tool is used in a publication, please cite **dynesty**, **MIST/minimint**, and Cavieres (in prep), and your data sources (e.g., Gaia, DECam).
