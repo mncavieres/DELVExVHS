@@ -9,6 +9,8 @@ Nested-sampling MIST + extinction fit using dynesty + minimint.
 - Debug: if debug=True, per-star folder with run/trace/corner and isochrone plots.
 
 Author: Manuel Cavieres
+Date: 2025-09-18
+Requires: minimint, dynesty, astropy, numpy, scipy, matplotlib, tqdm, corner
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from scipy.signal import find_peaks
 from astropy.table import Table
 
 import minimint
+from tqdm import tqdm
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -39,7 +42,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 # GLOBALS / CONSTANTS
 # =========================
 # Physical / prior bounds
-M_MIN, M_MAX = 0.1, 5.0                 # Msun
+M_MIN, M_MAX = 0.1, 15.0                 # Msun
 LOGAGE_MIN, LOGAGE_MAX = 5.0, 10.113943352306837  # yr
 FEH_MIN, FEH_MAX = -2.9, 0.9
 DIST_MIN, DIST_MAX = 1.0e3, 2.0e5         # pc
@@ -74,7 +77,7 @@ EXT_COEFF = {
 }
 
 # Error column suffixes to search for
-ERR_SUFFIXES = ["_ERR", "_ERRMAG", "_SIG", "_E"]
+ERR_SUFFIXES = ["_ERR", "_ERRMAG", "_SIG", "_E", "_error"]
 
 # Per-process interpolator cache (keyed by sorted tuple of bands)
 INTERP_CACHE = {}
@@ -169,7 +172,7 @@ def _build_observed_from_row(row, bands):
             if eerrc and _is_valid_number(row[eerrc]) and float(row[eerrc]) > 0:
                 obs['ebv'] = (float(ebv), float(row[eerrc]))
             else:
-                obs['ebv'] = (float(ebv), 0.3)
+                obs['ebv'] = (float(ebv), 0.1)
     # Photometry
     for b in bands:
         errc = _pick_err_col(b, cols)
@@ -243,6 +246,7 @@ def ptform_u5(u, obs, ebv_range,
         logd = np.log10(DIST_MIN_) + u[3] * (np.log10(DIST_MAX_) - np.log10(DIST_MIN_))
         d = 10**logd
     # E(B-V)
+    EBV_MAX = obs['ebv'] * 5 if ('ebv' in obs and obs['ebv'][1] > 0) else EBV_MAX_DEFAULT
     EBV_MIN, EBV_MAX = ebv_range
     ebv = EBV_MIN + u[4] * (EBV_MAX - EBV_MIN)
     return np.array([m, la, feh, d, ebv], dtype=float)
@@ -341,13 +345,16 @@ def fit_stars_with_minimint(
         'feh_p16','feh_p50','feh_p84','feh_multimodal',
         'dist_pc_p16','dist_pc_p50','dist_pc_p84','dist_multimodal',
         'ebv_p16','ebv_p50','ebv_p84','ebv_multimodal',
-        'lnZ','lnZ_err'
+        'lnZ','lnZ_err', 'fit_mode'
     ]
     for c in outcols:
         if c not in table.colnames:
             table[c] = np.full(len(table), np.nan)
+    # make the fit_mode column string type
+    if 'fit_mode' in table.colnames:
+        table['fit_mode'] = table['fit_mode'].astype(str)
 
-    for i, row in enumerate(table):
+    for i, row in tqdm(enumerate(table), total=len(table), desc="Fitting stars"):
         sid = str(row['source_id']) if 'source_id' in row.colnames else f"row{i}"
 
         # Detect usable bands
@@ -370,6 +377,7 @@ def fit_stars_with_minimint(
         mode = _choose_mode(obs)
         print(f"[{i+1}/{len(table)}] Fitting {sid} with {mode}-only mode, {len(bands)} bands")
         loglike = loglike_spec_theta if mode == 'spec' else loglike_phot_theta
+        table['fit_mode'][i] = mode
 
         # Args (must be picklable)
         logl_args = (obs, bands)
@@ -389,7 +397,7 @@ def fit_stars_with_minimint(
             sampler.run_nested(
                 nlive_init=nlive,
                 dlogz_init=dlogz,
-                print_progress=debug,
+                #print_progress=debug,
                 checkpoint_file=ckpt_file
             )
         res = sampler.results
@@ -501,13 +509,13 @@ def fit_stars_with_minimint(
             except Exception:
                 pass
 
-    # Save updated table
-    out_file = os.path.join(output_path, 'fit_results.fits')
-    try:
-        table.write(out_file, overwrite=True)
-    except Exception:
-        # fall back to ECSV if FITS column types collide
-        table.write(out_file.replace('.fits', '.ecsv'), overwrite=True)
+        # Save updated table
+        out_file = os.path.join(output_path, 'fit_results.fits')
+        try:
+            table.write(out_file, overwrite=True)
+        except Exception:
+            # fall back to ECSV if FITS column types collide
+            table.write(out_file.replace('.fits', '.ecsv'), overwrite=True)
     return table
 
 # Optional CLI usage
