@@ -8,7 +8,7 @@ Nested-sampling MIST + extinction fit using dynesty + minimint.
 - Output: same Table with posterior summaries and multimodality flags appended.
 - Debug: if debug=True, per-star folder with run/trace/corner and isochrone plots.
 
-Author: folded & pooled version
+Author: Manuel Cavieres
 """
 
 from __future__ import annotations
