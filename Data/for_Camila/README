@@ -1,0 +1,29 @@
+Last updated: Sep 26, 2023 by Himansh Rathore
+
+#################################################################################################################################################
+The dataset contains:
+-> SMC stellar particle data (3D positions and velocities) from the model 1 and model 2 simulations described in Besla+2012 MNRAS 421 and
+Besla+2013 MNRAS 428.
+
+#################################################################################################################################################
+Usage:
+-> The data provided shall be used in accordance with the Memorandum of Understanding (MoU) attached.
+-> Please cite Besla+2012 MNRAS 421 and Besla+2013 MNRAS 428 in the publication utilizing these datasets.
+-> For any queries, please contact gbesla@arizona.edu or himansh@arizona.edu
+
+#################################################################################################################################################
+Data description:
+All positions are in units of kpc and all velocities are in units of km/s.
+All positions and velocities are in the reference frame of the Milky Way.
+Coordinates are set up in such a way that the 3D position of the LMC matches what is actually observed.
+
+./SMC/SMC_model1_stars.csv -> positions and velocities ('x', 'y', 'z', 'v_x', 'v_y', 'v_z') for star particles in SMC model 1
+./SMC/SMC_model2_stars.csv -> positions and velocities ('x', 'y', 'z', 'v_x', 'v_y', 'v_z') for star particles in SMC model 2
+
+#################################################################################################################################################
+Anciliary information:
+Mass per SMC star particle (in solar mass) = 2600
+
+#################################################################################################################################################
+
+
